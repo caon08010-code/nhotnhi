@@ -7,7 +7,7 @@ import {
 export default function App() {
   const [activeTab, setActiveTab] = useState('community');
   
-  // Lưu danh sách thẻ nhân vật vào localStorage để chống mất khi F5
+  // Lưu danh sách thẻ nhân vật vào localStorage vĩnh viễn
   const [cards, setCards] = useState(() => {
     const saved = localStorage.getItem('app_cards');
     return saved ? JSON.parse(saved) : [
@@ -67,12 +67,20 @@ export default function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Xử lý import tệp JSON hoặc đọc metadata từ ảnh PNG thẻ nhân vật
+  // Xử lý import file JSON hoặc đọc metadata từ ảnh PNG và chuyển sang Base64 để lưu vĩnh viễn không mất khi F5
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const imageUrl = URL.createObjectURL(file);
+    const getBase64 = (file) => {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (event) => resolve(event.target.result);
+        reader.readAsDataURL(file);
+      });
+    };
+
+    const imageUrl = await getBase64(file);
 
     if (file.type === 'application/json') {
       const reader = new FileReader();
@@ -87,10 +95,10 @@ export default function App() {
             personality: data.personality || '',
             first_mes: data.first_mes || data.first_message || '',
             tags: Array.isArray(data.tags) ? data.tags.join(', ') : (data.tags || ''),
-            avatar: data.avatar || ''
+            avatar: data.avatar || imageUrl
           });
         } catch (err) {
-          alert('Không thể đọc tệp JSON này.');
+          alert('Failed to parse JSON file.');
         }
       };
       reader.readAsText(file);
@@ -106,10 +114,10 @@ export default function App() {
           let length = (bytes[offset] << 24) | (bytes[offset+1] << 16) | (bytes[offset+2] << 8) | bytes[offset+3];
           let type = decoder.decode(bytes.slice(offset+4, offset+8));
           
-          if (type === 'tEXt' || type === 'iTXt') {
+          if (type === 'tEXt' || type === 'iTXt' || type === 'zTXt') {
             let chunkData = bytes.slice(offset+8, offset+8+length);
             let text = decoder.decode(chunkData);
-            if (text.includes('chara')) {
+            if (text.includes('chara') || text.includes('spec') || text.includes('name')) {
               try {
                 let jsonStartIndex = text.indexOf('{');
                 let jsonEndIndex = text.lastIndexOf('}');
@@ -121,10 +129,16 @@ export default function App() {
               } catch (e) {
                 try {
                   let parts = text.split('\0');
-                  let base64Data = parts[parts.length - 1];
-                  let decoded = decodeURIComponent(escape(atob(base64Data)));
-                  charaJson = JSON.parse(decoded);
-                  break;
+                  for (let part of parts) {
+                    if (part.length > 20 && !part.includes('chara')) {
+                      let decoded = decodeURIComponent(escape(atob(part)));
+                      let parsed = JSON.parse(decoded);
+                      if (parsed.name || parsed.data) {
+                        charaJson = parsed;
+                        break;
+                      }
+                    }
+                  }
                 } catch (err) {}
               }
             }
@@ -163,7 +177,7 @@ export default function App() {
 
   const handleSaveCard = () => {
     if (!newCard.name) {
-      alert('Vui lòng nhập tên nhân vật!');
+      alert('Please enter character name!');
       return;
     }
     const cardObj = {
@@ -179,7 +193,7 @@ export default function App() {
   const startChatWithCard = (card) => {
     setSelectedCard(card);
     setChatMessages([
-      { sender: 'char', text: card.first_mes || 'Chưa có lời chào mặc định.' }
+      { sender: 'char', text: card.first_mes || 'No default greeting provided.' }
     ]);
     setActiveTab('chat');
   };
@@ -201,7 +215,7 @@ Personality: ${selectedCard.personality}
 Stay completely in character.`;
 
       if (apiProvider === 'gemini') {
-        if (!apiKey) throw new Error('Vui lòng nhập Gemini API Key!');
+        if (!apiKey) throw new Error('Please enter Gemini API Key!');
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -219,7 +233,7 @@ Stay completely in character.`;
         if (resData.error) throw new Error(resData.error.message);
         botResponse = resData.candidates[0].content.parts[0].text;
       } else if (apiProvider === 'openrouter') {
-        if (!apiKey) throw new Error('Vui lòng nhập OpenRouter API Key!');
+        if (!apiKey) throw new Error('Please enter OpenRouter API Key!');
         const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -244,12 +258,12 @@ Stay completely in character.`;
 
       setChatMessages([...updatedMessages, { sender: 'char', text: botResponse }]);
     } catch (err) {
-      alert(`Lỗi: ${err.message}`);
+      alert(`Error: ${err.message}`);
     } finally {
       setIsLoading(false);
     }
   };
-          return (
+      return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans">
       <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur px-6 py-4 flex justify-between items-center">
         <div className="flex gap-3 items-center">
@@ -260,13 +274,13 @@ Stay completely in character.`;
         </div>
         <nav className="flex gap-2">
           <button onClick={() => setActiveTab('community')} className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition ${activeTab === 'community' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
-            <Database className="w-4 h-4" /> Cộng đồng
+            <Database className="w-4 h-4" /> Community
           </button>
           <button onClick={() => setActiveTab('studio')} className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition ${activeTab === 'studio' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
-            <Upload className="w-4 h-4" /> Import / Tạo Thẻ
+            <Upload className="w-4 h-4" /> Studio / Import
           </button>
           <button onClick={() => setActiveTab('settings')} className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition ${activeTab === 'settings' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
-            <Settings className="w-4 h-4" /> Cấu hình API
+            <Settings className="w-4 h-4" /> API Settings
           </button>
         </nav>
       </header>
@@ -274,7 +288,7 @@ Stay completely in character.`;
       <main className="flex-1 overflow-y-auto p-6">
         {activeTab === 'community' && (
           <div className="max-w-6xl mx-auto space-y-6">
-            <h2 className="text-2xl font-bold text-slate-200">Danh sách Thẻ Nhân Vật</h2>
+            <h2 className="text-2xl font-bold text-slate-200">Character Cards Hub</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {cards.map(card => (
                 <div key={card.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition flex flex-col">
@@ -296,7 +310,7 @@ Stay completely in character.`;
                         ))}
                       </div>
                       <button onClick={() => startChatWithCard(card)} className="w-full bg-violet-600 hover:bg-violet-700 text-white font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition">
-                        <MessageSquare className="w-4 h-4" /> Bắt đầu Chat
+                        <MessageSquare className="w-4 h-4" /> Start Chat
                       </button>
                     </div>
                   </div>
@@ -308,28 +322,28 @@ Stay completely in character.`;
 
         {activeTab === 'studio' && (
           <div className="max-w-3xl mx-auto bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-6">
-            <h2 className="text-xl font-bold flex items-center gap-2"><Upload className="w-5 h-5 text-violet-400" /> Nhập khẩu hoặc Tạo mới Thẻ Nhân vật</h2>
+            <h2 className="text-xl font-bold flex items-center gap-2"><Upload className="w-5 h-5 text-violet-400" /> Import or Create Character Card</h2>
             <div className="border-2 border-dashed border-slate-700 hover:border-violet-500 rounded-xl p-6 text-center space-y-2 bg-slate-950/40">
               <Upload className="w-8 h-8 text-slate-400 mx-auto" />
-              <p className="text-sm text-slate-300">Tải lên tệp nhân vật dạng **.JSON** hoặc ảnh **.PNG**</p>
+              <p className="text-sm text-slate-300">Upload character file in **.JSON** or image **.PNG** format</p>
               <input type="file" accept=".json,image/png,image/jpeg" onChange={handleFileUpload} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-600 file:text-white hover:file:bg-violet-700 cursor-pointer" />
             </div>
 
             <div className="space-y-4 text-sm">
-              <div><label className="block text-slate-400 mb-1">Tên nhân vật *</label><input type="text" value={newCard.name} onChange={e => setNewCard({...newCard, name: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
-              <div><label className="block text-slate-400 mb-1">Tác giả</label><input type="text" value={newCard.creator} onChange={e => setNewCard({...newCard, creator: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
-              <div><label className="block text-slate-400 mb-1">Mô tả (Description)</label><textarea rows={3} value={newCard.description} onChange={e => setNewCard({...newCard, description: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
-              <div><label className="block text-slate-400 mb-1">Tính cách (Personality)</label><textarea rows={2} value={newCard.personality} onChange={e => setNewCard({...newCard, personality: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
-              <div><label className="block text-slate-400 mb-1">Lời chào (First Message)</label><textarea rows={3} value={newCard.first_mes} onChange={e => setNewCard({...newCard, first_mes: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
-              <div><label className="block text-slate-400 mb-1">Thẻ / Tag</label><input type="text" value={newCard.tags} onChange={e => setNewCard({...newCard, tags: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
+              <div><label className="block text-slate-400 mb-1">Character Name *</label><input type="text" value={newCard.name} onChange={e => setNewCard({...newCard, name: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
+              <div><label className="block text-slate-400 mb-1">Creator</label><input type="text" value={newCard.creator} onChange={e => setNewCard({...newCard, creator: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
+              <div><label className="block text-slate-400 mb-1">Description</label><textarea rows={3} value={newCard.description} onChange={e => setNewCard({...newCard, description: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
+              <div><label className="block text-slate-400 mb-1">Personality</label><textarea rows={2} value={newCard.personality} onChange={e => setNewCard({...newCard, personality: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
+              <div><label className="block text-slate-400 mb-1">First Message</label><textarea rows={3} value={newCard.first_mes} onChange={e => setNewCard({...newCard, first_mes: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
+              <div><label className="block text-slate-400 mb-1">Tags</label><input type="text" value={newCard.tags} onChange={e => setNewCard({...newCard, tags: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none" /></div>
             </div>
-            <button onClick={handleSaveCard} className="w-full bg-violet-600 hover:bg-violet-700 text-white font-bold py-3 rounded-lg transition">Đăng Thẻ Lên Cộng Đồng</button>
+            <button onClick={handleSaveCard} className="w-full bg-violet-600 hover:bg-violet-700 text-white font-bold py-3 rounded-lg transition">Publish Card to Community</button>
           </div>
         )}
 
         {activeTab === 'chat' && selectedCard && (
           <div className="max-w-4xl mx-auto h-[calc(100vh-120px)] flex flex-col bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-            {/* Header khung chat siêu xịn */}
+            {/* Header khung chat */}
             <div className="p-4 border-b border-slate-800 bg-slate-950/60 backdrop-blur flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <img src={selectedCard.avatar || 'https://via.placeholder.com/150'} alt="" className="w-11 h-11 rounded-full object-cover border border-violet-500/40 shadow" />
@@ -337,16 +351,16 @@ Stay completely in character.`;
                   <h3 className="font-bold text-slate-100 text-base">{selectedCard.name}</h3>
                   <div className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <span className="text-xs text-emerald-400 font-medium">Trực tuyến</span>
+                    <span className="text-xs text-emerald-400 font-medium">Online</span>
                   </div>
                 </div>
               </div>
               <button onClick={() => setActiveTab('community')} className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-xl transition font-medium border border-slate-700/50">
-                Đổi Nhân Vật
+                Switch Character
               </button>
             </div>
 
-            {/* Nội dung đoạn chat */}
+            {/* Nội dung chat */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {chatMessages.map((msg, index) => (
                 <div key={index} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -359,7 +373,7 @@ Stay completely in character.`;
                 <div className="flex justify-start">
                   <div className="bg-slate-800/80 text-slate-300 border border-slate-700/50 rounded-2xl px-4 py-2.5 text-xs flex items-center gap-2.5 shadow">
                     <RefreshCw className="w-3.5 h-3.5 animate-spin text-violet-400" /> 
-                    <span>Nhân vật đang suy nghĩ...</span>
+                    <span>Character is thinking...</span>
                   </div>
                 </div>
               )}
@@ -373,7 +387,7 @@ Stay completely in character.`;
                 value={inputMsg} 
                 onChange={e => setInputMsg(e.target.value)} 
                 onKeyDown={e => e.key === 'Enter' && handleSendMessage()} 
-                placeholder={`Nhắn tin với ${selectedCard.name}...`} 
+                placeholder={`Type a message to ${selectedCard.name}...`} 
                 className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none text-sm transition shadow-inner" 
               />
               <button 
@@ -389,26 +403,26 @@ Stay completely in character.`;
 
         {activeTab === 'settings' && (
           <div className="max-w-2xl mx-auto bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-6">
-            <h2 className="text-xl font-bold flex items-center gap-2"><Key className="w-5 h-5 text-violet-400" /> Cấu hình API Khóa AI</h2>
+            <h2 className="text-xl font-bold flex items-center gap-2"><Key className="w-5 h-5 text-violet-400" /> API Settings</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm text-slate-400 mb-2">Chọn Nhà Cung Cấp</label>
+                <label className="block text-sm text-slate-400 mb-2">Select Provider</label>
                 <div className="grid grid-cols-2 gap-4">
                   <button onClick={() => setApiProvider('gemini')} className={`p-4 rounded-xl border text-left font-medium flex items-center gap-3 transition ${apiProvider === 'gemini' ? 'border-violet-500 bg-violet-950/30 text-white' : 'border-slate-800 text-slate-400 bg-slate-950/40'}`}>
-                    <Cpu className="w-5 h-5 text-violet-400" /><div><div>Gemini API</div><div className="text-xs text-slate-500 font-normal">Miễn phí</div></div>
+                    <Cpu className="w-5 h-5 text-violet-400" /><div><div>Gemini API</div><div className="text-xs text-slate-500 font-normal">Free</div></div>
                   </button>
                   <button onClick={() => setApiProvider('openrouter')} className={`p-4 rounded-xl border text-left font-medium flex items-center gap-3 transition ${apiProvider === 'openrouter' ? 'border-violet-500 bg-violet-950/30 text-white' : 'border-slate-800 text-slate-400 bg-slate-950/40'}`}>
-                    <Sparkles className="w-5 h-5 text-pink-400" /><div><div>OpenRouter API</div><div className="text-xs text-slate-500 font-normal">Đa dạng Model</div></div>
+                    <Sparkles className="w-5 h-5 text-pink-400" /><div><div>OpenRouter API</div><div className="text-xs text-slate-500 font-normal">Multiple Models</div></div>
                   </button>
                 </div>
               </div>
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Khóa API Key</label>
-                <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="Dán khóa vào đây..." className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none text-sm" />
+                <label className="block text-sm text-slate-400 mb-1">API Key</label>
+                <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="Paste your API key here..." className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none text-sm" />
               </div>
               {apiProvider === 'openrouter' && (
                 <div>
-                  <label className="block text-sm text-slate-400 mb-1">Tên Model</label>
+                  <label className="block text-sm text-slate-400 mb-1">Model Name</label>
                   <input type="text" value={openRouterModel} onChange={e => setOpenRouterModel(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-100 focus:border-violet-500 outline-none text-sm" />
                 </div>
               )}
@@ -418,5 +432,5 @@ Stay completely in character.`;
       </main>
     </div>
   );
-                            }
-                                                                                                 
+              }
+                                                                                                                                                             
