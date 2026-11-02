@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Upload, MessageSquare, Settings, Sparkles, Image as ImageIcon, 
-  Trash2, Send, Database, ShieldAlert, Cpu, Key, RefreshCw, FileText
+  Trash2, Send, Database, ShieldAlert, Cpu, Key, RefreshCw, FileText, Download
 } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('community');
   
-  // Lưu danh sách thẻ nhân vật vào localStorage vĩnh viễn
   const [cards, setCards] = useState(() => {
     const saved = localStorage.getItem('app_cards');
     return saved ? JSON.parse(saved) : [
@@ -26,7 +25,6 @@ export default function App() {
 
   const [selectedCard, setSelectedCard] = useState(null);
   
-  // Lưu cấu hình API vào localStorage
   const [apiProvider, setApiProvider] = useState(() => localStorage.getItem('api_provider') || 'gemini');
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('api_key') || '');
   const [openRouterModel, setOpenRouterModel] = useState(() => localStorage.getItem('openrouter_model') || 'meta-llama/llama-3-8b-instruct:free');
@@ -46,7 +44,6 @@ export default function App() {
     avatar: ''
   });
 
-  // Tự động lưu dữ liệu vào localStorage khi có thay đổi
   useEffect(() => {
     localStorage.setItem('app_cards', JSON.stringify(cards));
   }, [cards]);
@@ -67,7 +64,6 @@ export default function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Xử lý import file JSON hoặc đọc metadata từ ảnh PNG và chuyển sang Base64 để lưu vĩnh viễn không mất khi F5
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -117,54 +113,52 @@ export default function App() {
           if (type === 'tEXt' || type === 'iTXt' || type === 'zTXt') {
             let chunkData = bytes.slice(offset+8, offset+8+length);
             let text = decoder.decode(chunkData);
-            if (text.includes('chara') || text.includes('spec') || text.includes('name')) {
+            
+            if (text.includes('chara') || text.includes('name') || text.length > 50) {
               try {
                 let jsonStartIndex = text.indexOf('{');
                 let jsonEndIndex = text.lastIndexOf('}');
                 if (jsonStartIndex !== -1 && jsonEndIndex !== -1) {
                   let jsonStr = text.substring(jsonStartIndex, jsonEndIndex + 1);
-                  charaJson = JSON.parse(jsonStr);
-                  break;
+                  let parsed = JSON.parse(jsonStr);
+                  if (parsed.name || parsed.data || parsed.description) {
+                    charaJson = parsed;
+                    break;
+                  }
                 }
-              } catch (e) {
-                try {
-                  let parts = text.split('\0');
-                  for (let part of parts) {
-                    if (part.length > 20 && !part.includes('chara')) {
-                      let decoded = decodeURIComponent(escape(atob(part)));
+              } catch (e) {}
+
+              try {
+                let parts = text.split('\0');
+                for (let part of parts) {
+                  if (part.length > 20) {
+                    try {
+                      let decoded = atob(part);
                       let parsed = JSON.parse(decoded);
                       if (parsed.name || parsed.data) {
                         charaJson = parsed;
                         break;
                       }
-                    }
+                    } catch (err2) {}
                   }
-                } catch (err) {}
-              }
+                }
+              } catch (err) {}
             }
           }
           offset += 12 + length;
           if (type === 'IEND') break;
         }
 
-        if (charaJson) {
-          const data = charaJson.data || charaJson;
-          setNewCard({
-            name: data.name || file.name.replace(/\.[^/.]+$/, ""),
-            creator: data.creator || data.creator_notes || 'Anonymous',
-            description: data.description || '',
-            personality: data.personality || '',
-            first_mes: data.first_mes || data.first_message || '',
-            tags: Array.isArray(data.tags) ? data.tags.join(', ') : (data.tags || ''),
-            avatar: imageUrl
-          });
-        } else {
-          setNewCard(prev => ({
-            ...prev,
-            avatar: imageUrl,
-            name: prev.name || file.name.replace(/\.[^/.]+$/, "")
-          }));
-        }
+        const data = charaJson ? (charaJson.data || charaJson) : {};
+        setNewCard({
+          name: data.name || file.name.replace(/\.[^/.]+$/, ""),
+          creator: data.creator || data.creator_notes || 'Anonymous',
+          description: data.description || '',
+          personality: data.personality || data.extensions?.personality || '',
+          first_mes: data.first_mes || data.first_message || '',
+          tags: Array.isArray(data.tags) ? data.tags.join(', ') : (data.tags || ''),
+          avatar: imageUrl
+        });
       } catch (err) {
         setNewCard(prev => ({
           ...prev,
@@ -174,8 +168,7 @@ export default function App() {
       }
     }
   };
-
-  const handleSaveCard = () => {
+          const handleSaveCard = () => {
     if (!newCard.name) {
       alert('Please enter character name!');
       return;
@@ -196,6 +189,25 @@ export default function App() {
       { sender: 'char', text: card.first_mes || 'No default greeting provided.' }
     ]);
     setActiveTab('chat');
+  };
+
+  const handleDownloadCard = (card) => {
+    if (card.avatar && card.avatar.startsWith('data:image')) {
+      const a = document.createElement('a');
+      a.href = card.avatar;
+      a.download = `${card.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } else {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(card, null, 2));
+      const a = document.createElement('a');
+      a.href = dataStr;
+      a.download = `${card.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
   };
 
   const handleSendMessage = async () => {
@@ -263,7 +275,7 @@ Stay completely in character.`;
       setIsLoading(false);
     }
   };
-      return (
+              return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans">
       <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur px-6 py-4 flex justify-between items-center">
         <div className="flex gap-3 items-center">
@@ -292,7 +304,7 @@ Stay completely in character.`;
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {cards.map(card => (
                 <div key={card.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition flex flex-col">
-                  <div className="h-48 bg-slate-800 relative overflow-hidden">
+                  <div className="h-48 bg-slate-800 relative overflow-hidden group">
                     {card.avatar ? <img src={card.avatar} alt={card.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-slate-600"><ImageIcon className="w-12 h-12" /></div>}
                   </div>
                   <div className="p-4 flex-1 flex flex-col justify-between space-y-4">
@@ -303,15 +315,20 @@ Stay completely in character.`;
                       </div>
                       <p className="text-slate-400 text-sm mt-2 line-clamp-3">{card.description}</p>
                     </div>
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       <div className="flex flex-wrap gap-1">
                         {card.tags?.map((t, idx) => (
                           <span key={idx} className="text-xs bg-violet-950/60 text-violet-300 border border-violet-800/40 px-2 py-0.5 rounded">{t}</span>
                         ))}
                       </div>
-                      <button onClick={() => startChatWithCard(card)} className="w-full bg-violet-600 hover:bg-violet-700 text-white font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition">
-                        <MessageSquare className="w-4 h-4" /> Start Chat
-                      </button>
+                      <div className="flex gap-2 pt-2">
+                        <button onClick={() => startChatWithCard(card)} className="flex-1 bg-violet-600 hover:bg-violet-700 text-white font-medium py-2 rounded-lg flex items-center justify-center gap-2 transition text-sm">
+                          <MessageSquare className="w-4 h-4" /> Chat
+                        </button>
+                        <button onClick={() => handleDownloadCard(card)} title="Download Character Card" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-lg flex items-center justify-center transition border border-slate-700">
+                          <Download className="w-4 h-4 text-violet-400" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -343,7 +360,6 @@ Stay completely in character.`;
 
         {activeTab === 'chat' && selectedCard && (
           <div className="max-w-4xl mx-auto h-[calc(100vh-120px)] flex flex-col bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-            {/* Header khung chat */}
             <div className="p-4 border-b border-slate-800 bg-slate-950/60 backdrop-blur flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <img src={selectedCard.avatar || 'https://via.placeholder.com/150'} alt="" className="w-11 h-11 rounded-full object-cover border border-violet-500/40 shadow" />
@@ -360,7 +376,6 @@ Stay completely in character.`;
               </button>
             </div>
 
-            {/* Nội dung chat */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {chatMessages.map((msg, index) => (
                 <div key={index} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -380,7 +395,6 @@ Stay completely in character.`;
               <div ref={chatEndRef} />
             </div>
 
-            {/* Ô nhập tin nhắn */}
             <div className="p-4 border-t border-slate-800 bg-slate-950/80 backdrop-blur flex gap-3 items-center">
               <input 
                 type="text" 
@@ -432,5 +446,5 @@ Stay completely in character.`;
       </main>
     </div>
   );
-              }
-                                                                                                                                                             
+                }
+                                                                                                                                                     
